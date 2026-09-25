@@ -52,11 +52,12 @@ bun install
 bun run check
 ```
 
-To release, bump the version and push the tag; GitHub Actions publishes it to npm:
+To release, bump the version, then publish a GitHub release for the tag; GitHub Actions publishes it to npm:
 
 ```sh
 npm version patch
 git push --follow-tags
+gh release create "v$(jq -r .version package.json)" --generate-notes
 ```
 
 ## License

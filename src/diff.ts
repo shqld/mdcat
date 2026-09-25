@@ -1092,7 +1092,7 @@ function findTableEnd(lines: readonly DiffLine[], start: number): number | null 
   const partial = parsePartialTableSide(candidate, "old") !== null
     && parsePartialTableSide(candidate, "new") !== null;
 
-  return hasChange && (oldTable !== null || newTable !== null || partial) ? end : null;
+  return oldTable !== null || newTable !== null || (hasChange && partial) ? end : null;
 }
 
 function toTableDiffBlocks(lines: readonly DiffLine[]): readonly MarkdownDiffBlock[] {

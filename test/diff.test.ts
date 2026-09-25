@@ -1096,7 +1096,7 @@ describe("Markdown documents", () => {
     const file = parseMarkdownDocument("doc.md", "---\ntitle: Doc\n---\n\n```ts\nconst x = 1;\n```\n\n| a | b |\n| - | - |\n| 1 | 2 |\n");
     expect(file.status).toBe("unchanged");
     expect(file.hunks).toHaveLength(1);
-    expect(file.hunks[0]?.blocks.map((block) => block.type)).toEqual(["frontmatter", "code", "flow"]);
+    expect(file.hunks[0]?.blocks.map((block) => block.type)).toEqual(["frontmatter", "code", "table"]);
     expect(file.hunks[0]?.newLength).toBe(11);
   });
 });

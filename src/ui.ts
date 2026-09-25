@@ -20,6 +20,7 @@ import {
   type CliRenderer,
   type KeyEvent,
   type OptimizedBuffer,
+  type PasteEvent,
   type Selection,
   type TextChunk,
   type TreeSitterClient,
@@ -43,6 +44,7 @@ import type {
   MarkdownDiffTableRow,
 } from "./diff.ts";
 import type { FlowContainer, FlowLeaf, InlineText } from "./flow.ts";
+import { findMatchLines, highlightMatches } from "./search.ts";
 import { diffReadable, inlinePlainText, lineBreakText, sameIgnoringWhitespace, sameInlineContent } from "./inline-diff.ts";
 
 const COLOR = {
@@ -69,7 +71,12 @@ const COLOR = {
   inlineCode: "#dc9676",
   inlineCodeBackground: "#26201f",
   code: "#a5d6ff",
+  searchMatch: "#4a4020",
+  searchCurrent: "#c8963c",
+  searchText: "#12141c",
 };
+
+const FOOTER_HELP = "j/k scroll · PgUp/PgDn page · g/G jump · / search · n/N next/prev · drag copy · q quit";
 
 export interface DiffViewer {
   readonly root: BoxRenderable;
@@ -142,26 +149,32 @@ export function buildDiffViewer(
     scroll.add(createFile(renderer, file, syntaxStyle, options.treeSitterClient));
   }
 
+  const footer = createFooter(renderer);
   root.add(scroll);
-  root.add(createFooter(renderer));
+  root.add(footer.box);
   renderer.root.add(root);
   scroll.focus();
 
-  const keyHandler = createKeyHandler(renderer, scroll);
+  const search = createSearch(renderer, scroll, footer.text);
+  const keyHandler = createKeyHandler(renderer, scroll, search);
   const selectionHandler = createSelectionHandler(renderer, options.copyText);
   renderer.keyInput.on("keypress", keyHandler);
+  renderer.keyInput.on("paste", search.paste);
   renderer.on(CliRenderEvents.SELECTION, selectionHandler);
+  renderer.addPostProcessFn(search.highlight);
   renderer.once(CliRenderEvents.DESTROY, () => {
     renderer.keyInput.off("keypress", keyHandler);
+    renderer.keyInput.off("paste", search.paste);
     renderer.off(CliRenderEvents.SELECTION, selectionHandler);
+    renderer.removePostProcessFn(search.highlight);
     syntaxStyle.destroy();
   });
 
   return { root, scroll };
 }
 
-function createFooter(renderer: CliRenderer): BoxRenderable {
-  const footer = new BoxRenderable(renderer, {
+function createFooter(renderer: CliRenderer): { readonly box: BoxRenderable; readonly text: TextRenderable } {
+  const box = new BoxRenderable(renderer, {
     id: "mdcat-footer",
     width: "100%",
     height: 1,
@@ -169,13 +182,12 @@ function createFooter(renderer: CliRenderer): BoxRenderable {
     paddingX: 1,
     backgroundColor: COLOR.status,
   });
-  footer.add(
-    new TextRenderable(renderer, {
-      content: "j/k scroll · PgUp/PgDn page · g/G jump · drag copy · q quit",
-      fg: COLOR.muted,
-    }),
-  );
-  return footer;
+  const text = new TextRenderable(renderer, {
+    content: FOOTER_HELP,
+    fg: COLOR.muted,
+  });
+  box.add(text);
+  return { box, text };
 }
 
 function createFile(
@@ -1340,8 +1352,137 @@ function createMarkdownStyle(): SyntaxStyle {
   });
 }
 
-function createKeyHandler(renderer: CliRenderer, scroll: ScrollBoxRenderable): (key: KeyEvent) => void {
+interface Search {
+  readonly prompting: () => boolean;
+  readonly start: () => void;
+  readonly input: (key: KeyEvent) => void;
+  readonly paste: (event: PasteEvent) => void;
+  readonly next: (direction: 1 | -1) => void;
+  readonly highlight: (buffer: OptimizedBuffer) => void;
+}
+
+function createSearch(renderer: CliRenderer, scroll: ScrollBoxRenderable, footer: TextRenderable): Search {
+  const colors = {
+    match: RGBA.fromHex(COLOR.searchMatch),
+    current: RGBA.fromHex(COLOR.searchCurrent),
+    text: RGBA.fromHex(COLOR.searchText),
+  };
+  let draft: string | null = null;
+  let query = "";
+  let current: number | null = null;
+
+  const showStatus = (content: string): void => {
+    footer.content = content;
+    footer.fg = COLOR.text;
+  };
+
+  const jump = (direction: 1 | -1): void => {
+    const lines = findMatchLines(scroll.content, query);
+    if (lines.length === 0) {
+      current = null;
+      showStatus(`Pattern not found: ${query}`);
+      return;
+    }
+    const top = scroll.scrollTop;
+    const visible = current !== null && current >= top && current < top + scroll.viewport.height;
+    const from = visible && current !== null ? current : direction === 1 ? top - 1 : top;
+    const index = direction === 1
+      ? lines.findIndex((line) => line > from)
+      : lines.findLastIndex((line) => line < from);
+    const wrapped = index === -1;
+    const target = wrapped ? (direction === 1 ? 0 : lines.length - 1) : index;
+    current = lines[target] ?? null;
+    if (current !== null) {
+      scroll.scrollTo(current);
+    }
+    showStatus(`/${query}  ${target + 1}/${lines.length}${wrapped ? "  (wrapped)" : ""}`);
+    renderer.requestRender();
+  };
+
+  return {
+    prompting: () => draft !== null,
+    start: () => {
+      draft = "";
+      renderer.currentFocusedRenderable?.blur();
+      showStatus("/");
+    },
+    input: (key) => {
+      if (draft === null) {
+        return;
+      }
+      if (key.name === "escape") {
+        draft = null;
+        scroll.focus();
+        footer.content = query.length === 0 ? FOOTER_HELP : `/${query}`;
+        footer.fg = COLOR.muted;
+        return;
+      }
+      if (key.name === "return" || key.name === "enter") {
+        const submitted = draft;
+        draft = null;
+        scroll.focus();
+        if (submitted.length > 0) {
+          query = submitted;
+        }
+        current = null;
+        if (query.length === 0) {
+          footer.content = FOOTER_HELP;
+          footer.fg = COLOR.muted;
+          return;
+        }
+        jump(1);
+        return;
+      }
+      if (key.name === "backspace") {
+        draft = draft.slice(0, -1);
+      } else if (!key.ctrl && !key.meta && key.sequence.length > 0 && !/[\u0000-\u001f\u007f]/.test(key.sequence)) {
+        draft += key.sequence;
+      }
+      showStatus(`/${draft}`);
+    },
+    paste: (event) => {
+      if (draft === null) {
+        return;
+      }
+      draft += new TextDecoder().decode(event.bytes).replace(/\s+/g, " ");
+      showStatus(`/${draft}`);
+    },
+    next: (direction) => {
+      if (query.length > 0) {
+        jump(direction);
+      }
+    },
+    highlight: (buffer) => {
+      const viewport = scroll.viewport;
+      highlightMatches(
+        buffer,
+        { x: viewport.screenX, y: viewport.screenY, width: viewport.width, height: viewport.height },
+        query,
+        current === null ? null : current - scroll.scrollTop,
+        colors,
+      );
+    },
+  };
+}
+
+function createKeyHandler(
+  renderer: CliRenderer,
+  scroll: ScrollBoxRenderable,
+  search: Search,
+): (key: KeyEvent) => void {
   return (key) => {
+    if (search.prompting()) {
+      search.input(key);
+      return;
+    }
+    if (key.sequence === "/") {
+      search.start();
+      return;
+    }
+    if (key.name === "n") {
+      search.next(key.shift ? -1 : 1);
+      return;
+    }
     if (key.name === "q" || key.name === "escape") {
       renderer.destroy();
       return;

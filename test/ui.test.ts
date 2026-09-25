@@ -734,3 +734,82 @@ test("renders a Markdown document without diff markers", async () => {
   expect(backgrounds).not.toContain("50,28,31,255");
   expect(backgrounds).not.toContain("18,38,30,255");
 });
+
+test("searches with / and moves between matches with n and N", async () => {
+  const filler = Array.from({ length: 30 }, (_, index) => `Filler paragraph ${index}.`).join("\n\n");
+  const document = { files: [parseMarkdownDocument("guide.md", `First Needle here.\n\n${filler}\n\nSecond needle there.\n`)] };
+  setup = await createTestRenderer({ width: 60, height: 12 });
+
+  const viewer = buildDiffViewer(setup.renderer, document);
+  await setup.renderOnce();
+  await setup.waitForVisualIdle();
+
+  await setup.mockInput.typeText("/needle");
+  await setup.waitForVisualIdle();
+  expect(setup.captureCharFrame()).toContain("/needle");
+  setup.mockInput.pressEnter();
+  await setup.waitForVisualIdle();
+
+  expect(viewer.scroll.scrollTop).toBeGreaterThan(0);
+  expect(setup.captureCharFrame()).toContain("/needle  1/2");
+  const firstRow = setup.captureCharFrame().split("\n").find((line) => line.includes("First Needle here."));
+  expect(firstRow).toBeDefined();
+
+  setup.mockInput.pressKey("n");
+  await setup.waitForVisualIdle();
+  let frame = setup.captureCharFrame();
+  expect(frame).toContain("Second needle there.");
+  expect(frame).toContain("/needle  2/2");
+  const highlighted = setup.captureSpans().lines.flatMap((line) => line.spans).find((span) => span.text === "needle");
+  expect(highlighted?.bg.toInts()).toEqual([200, 150, 60, 255]);
+
+  setup.mockInput.pressKey("n");
+  await setup.waitForVisualIdle();
+  frame = setup.captureCharFrame();
+  expect(frame).toContain("First Needle here.");
+  expect(frame).toContain("/needle  1/2  (wrapped)");
+
+  setup.mockInput.pressKey("n", { shift: true });
+  await setup.waitForVisualIdle();
+  expect(setup.captureCharFrame()).toContain("/needle  2/2  (wrapped)");
+});
+
+test("keeps typed keys in the search prompt and cancels it with Escape", async () => {
+  const document = { files: [parseMarkdownDocument("guide.md", "Only text.\n")] };
+  setup = await createTestRenderer({ width: 60, height: 10 });
+
+  buildDiffViewer(setup.renderer, document);
+  await setup.renderOnce();
+
+  await setup.mockInput.typeText("/qjk");
+  await setup.waitForVisualIdle();
+  expect(setup.renderer.isDestroyed).toBe(false);
+  expect(setup.captureCharFrame()).toContain("/qjk");
+
+  setup.mockInput.pressKey("ESCAPE");
+  await Bun.sleep(100);
+  await setup.renderOnce();
+  expect(setup.renderer.isDestroyed).toBe(false);
+  expect(setup.captureCharFrame()).toContain("/ search");
+
+  setup.mockInput.typeText("/missing");
+  setup.mockInput.pressEnter();
+  await setup.waitForVisualIdle();
+  expect(setup.captureCharFrame()).toContain("Pattern not found: missing");
+});
+
+test("finds a pasted phrase that the renderer wrapped across lines", async () => {
+  const document = { files: [parseMarkdownDocument("guide.md", "The cache keeps search results so that repeated queries return quickly.\n")] };
+  setup = await createTestRenderer({ width: 30, height: 12 });
+
+  buildDiffViewer(setup.renderer, document);
+  await setup.renderOnce();
+  await setup.waitForVisualIdle();
+
+  await setup.mockInput.pasteBracketedText("x");
+  await setup.mockInput.typeText("/");
+  await setup.mockInput.pasteBracketedText("search\nresults");
+  setup.mockInput.pressEnter();
+  await setup.waitForVisualIdle();
+  expect(setup.captureCharFrame()).toContain("/search results  1/1");
+});

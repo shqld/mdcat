@@ -49,7 +49,7 @@ mdgit show HEAD:docs/guide.md
 
 ### Keys
 
-Scroll with the arrow keys or `j`/`k`, jump with `g`/`G`, and quit with `q`. Dragging selects and copies text. Click a `<details>` summary to toggle it.
+Scroll with the arrow keys or `j`/`k`, jump with `g`/`G`, and quit with `q`. Press `/` to search, then `n`/`N` for the next and previous match; the search ignores case unless the query contains an uppercase letter. Dragging selects and copies text. Click a `<details>` summary to toggle it.
 
 ## Development
 

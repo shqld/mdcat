@@ -16,8 +16,8 @@
   ],
   "type": "module",
   "bin": {
-    "mdcat": "./dist/mdcat.js",
-    "mdgit": "./dist/mdgit.js"
+    "mdcat": "dist/mdcat.js",
+    "mdgit": "dist/mdgit.js"
   },
   "files": [
     "dist"

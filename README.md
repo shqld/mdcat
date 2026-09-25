@@ -2,7 +2,9 @@
 
 Render Markdown files and Markdown diffs as rich text in the terminal. In a diff, added blocks are green, removed blocks are red, and edited paragraphs, list items, and table cells show inline word diffs.
 
-![mdgit diff rendering a change to a Markdown file](assets/mdgit-diff.png)
+| `mdcat guide.md` | `mdgit diff` |
+| --- | --- |
+| ![mdcat rendering a Markdown file](assets/mdcat.png) | ![mdgit diff rendering a change to a Markdown file](assets/mdgit-diff.png) |
 
 ## Installation
 
@@ -30,8 +32,6 @@ mdcat README.md docs/*.md
 cat README.md | mdcat
 git diff | mdcat
 ```
-
-![mdcat rendering a Markdown file](assets/mdcat.png)
 
 ### mdgit
 

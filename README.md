@@ -4,31 +4,44 @@ Render Markdown files and Markdown diffs as rich text in the terminal. In a diff
 
 ## Installation
 
-Requires [Bun](https://bun.sh) 1.3 or later.
+Supported runtimes:
+
+- Node.js 26.4 or later
+- Bun 1.3 or later
 
 ```sh
+npm install -g @shqld/mdcat
+# or
 bun install -g @shqld/mdcat
 ```
 
-`npm install -g @shqld/mdcat` also works when `bun` is on `PATH`.
+The commands start with Node.js. To run them with Bun instead, pass the file to Bun, for example `bun $(which mdcat) README.md`.
 
 ## Usage
 
-`mdcat` renders Markdown files, or Markdown or a unified diff from stdin:
+### mdcat
+
+`mdcat` renders Markdown files. With no file, it reads stdin and renders it as a diff when it contains one, or as a Markdown document otherwise.
 
 ```sh
 mdcat README.md docs/*.md
+cat README.md | mdcat
 git diff | mdcat
 ```
 
-`mdgit diff` and `mdgit show` take the same arguments as `git diff` and `git show`, and render only the Markdown files in the result:
+### mdgit
+
+`mdgit diff` and `mdgit show` take the same arguments as `git diff` and `git show`, and render only the Markdown files in the result.
 
 ```sh
+mdgit diff
 mdgit diff --cached
 mdgit diff HEAD~3..HEAD -- docs/
 mdgit show HEAD~1
 mdgit show HEAD:docs/guide.md
 ```
+
+### Keys
 
 Scroll with the arrow keys or `j`/`k`, jump with `g`/`G`, and quit with `q`. Dragging selects and copies text. Click a `<details>` summary to toggle it.
 

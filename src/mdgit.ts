@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S node --experimental-ffi --disable-warning=ExperimentalWarning
 
 import { parseMarkdownDiff, parseMarkdownDocument, type MarkdownDiff, type MarkdownDiffFile } from "./diff.ts";
 import { createBlobReader, readBlobObject, readGit, type GitSubcommand } from "./git.ts";
@@ -59,5 +59,5 @@ async function loadGit(command: GitSubcommand, args: readonly string[]): Promise
 }
 
 if (import.meta.main) {
-  process.exitCode = await main(Bun.argv.slice(2));
+  process.exitCode = await main(process.argv.slice(2));
 }

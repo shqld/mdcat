@@ -25,6 +25,7 @@ import {
   type TreeSitterClient,
 } from "@opentui/core";
 import { Lexer, type Token, type Tokens } from "marked";
+import { spawn } from "node:child_process";
 import { openSync } from "node:fs";
 import { ReadStream } from "node:tty";
 import stringWidth from "string-width";
@@ -1382,18 +1383,16 @@ function createSelectionHandler(
 }
 
 async function copyToSystemClipboard(text: string): Promise<void> {
-  for (const command of clipboardCommands()) {
-    try {
-      const child = Bun.spawn(command, {
-        stdin: new Blob([text]),
-        stdout: "ignore",
-        stderr: "ignore",
-      });
-      if (await child.exited === 0) {
-        return;
-      }
-    } catch {
-      continue;
+  for (const [command = "", ...args] of clipboardCommands()) {
+    const copied = await new Promise<boolean>((resolve) => {
+      const child = spawn(command, args, { stdio: ["pipe", "ignore", "ignore"] });
+      child.on("error", () => resolve(false));
+      child.on("close", (code) => resolve(code === 0));
+      child.stdin.on("error", () => undefined);
+      child.stdin.end(text);
+    });
+    if (copied) {
+      return;
     }
   }
 }

@@ -1,5 +1,7 @@
+import { spawn, spawnSync } from "node:child_process";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import { text } from "node:stream/consumers";
 
 export type GitSubcommand = "diff" | "show";
 
@@ -57,17 +59,18 @@ function withoutFormatOptions(args: readonly string[]): string[] {
 }
 
 export async function readGit(subcommand: GitSubcommand, args: readonly string[]): Promise<string> {
-  const process = Bun.spawn(gitCommand(subcommand, args), {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  const [command = "git", ...commandArgs] = gitCommand(subcommand, args);
+  const child = spawn(command, commandArgs, { stdio: ["ignore", "pipe", "pipe"] });
   const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(process.stdout).text(),
-    new Response(process.stderr).text(),
-    process.exited,
+    text(child.stdout),
+    text(child.stderr),
+    new Promise<number | null>((resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", resolve);
+    }),
   ]);
 
-  if (exitCode > 1) {
+  if (exitCode === null || exitCode > 1) {
     throw new Error(stderr.trim() || `git ${subcommand} exited with status ${exitCode}`);
   }
 
@@ -78,16 +81,15 @@ export function readBlobObject(object: string): string | null {
   if (object.startsWith("-")) {
     return null;
   }
-  const result = Bun.spawnSync(["git", "cat-file", "blob", object], { stdout: "pipe", stderr: "ignore" });
-  return result.exitCode === 0 ? result.stdout.toString() : null;
+  return runGit(["cat-file", "blob", object]);
 }
 
 export function createBlobReader(): (blob: string, paths: readonly string[]) => string | null {
-  const toplevel = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], { stdout: "pipe", stderr: "ignore" });
-  if (toplevel.exitCode !== 0) {
+  const toplevel = runGit(["rev-parse", "--show-toplevel"]);
+  if (toplevel === null) {
     return () => null;
   }
-  const root = realpathSync(toplevel.stdout.toString().trim());
+  const root = realpathSync(toplevel.trim());
   const cwd = realpathSync(process.cwd());
   const cache = new Map<string, string | null>();
 
@@ -108,8 +110,7 @@ export function createBlobReader(): (blob: string, paths: readonly string[]) => 
 }
 
 function readObject(root: string, blob: string): string | null {
-  const result = Bun.spawnSync(["git", "cat-file", "blob", blob], { cwd: root, stdout: "pipe", stderr: "ignore" });
-  return result.exitCode === 0 ? result.stdout.toString() : null;
+  return runGit(["cat-file", "blob", blob], root);
 }
 
 function readWorkingTree(root: string, blob: string, candidate: string): string | null {
@@ -122,15 +123,16 @@ function readWorkingTree(root: string, blob: string, candidate: string): string 
     if (!statSync(file).isFile()) {
       return null;
     }
-    const hash = Bun.spawnSync(["git", "hash-object", `--path=${inside}`, file], {
-      cwd: root,
-      stdout: "pipe",
-      stderr: "ignore",
-    });
-    return hash.exitCode === 0 && hash.stdout.toString().trim().startsWith(blob)
+    const hash = runGit(["hash-object", `--path=${inside}`, file], root);
+    return hash?.trim().startsWith(blob)
       ? readFileSync(file, "utf8")
       : null;
   } catch {
     return null;
   }
+}
+
+function runGit(args: readonly string[], cwd?: string): string | null {
+  const result = spawnSync("git", args, { cwd, encoding: "utf8", maxBuffer: Infinity, stdio: ["ignore", "pipe", "ignore"] });
+  return result.status === 0 ? result.stdout : null;
 }

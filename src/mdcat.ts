@@ -1,6 +1,7 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S node --experimental-ffi --disable-warning=ExperimentalWarning
 
 import { readFile } from "node:fs/promises";
+import { text } from "node:stream/consumers";
 
 import { isUnifiedDiff, parseMarkdownDiff, parseMarkdownDocument, type MarkdownDiff } from "./diff.ts";
 import { createBlobReader } from "./git.ts";
@@ -29,7 +30,7 @@ export async function main(args: readonly string[]): Promise<number> {
 }
 
 async function readStdin(): Promise<MarkdownDiff> {
-  const input = await Bun.stdin.text();
+  const input = await text(process.stdin);
   return isUnifiedDiff(input)
     ? parseMarkdownDiff(input, createBlobReader())
     : { files: [parseMarkdownDocument(null, input)] };
@@ -41,5 +42,5 @@ async function readFiles(paths: readonly string[]): Promise<MarkdownDiff> {
 }
 
 if (import.meta.main) {
-  process.exitCode = await main(Bun.argv.slice(2));
+  process.exitCode = await main(process.argv.slice(2));
 }

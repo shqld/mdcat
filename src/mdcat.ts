@@ -6,13 +6,16 @@ import { text } from "node:stream/consumers";
 import { isUnifiedDiff, parseMarkdownDiff, parseMarkdownDocument, type MarkdownDiff } from "./diff.ts";
 import { createBlobReader } from "./git.ts";
 import { render } from "./render.ts";
+import { update } from "./update.ts";
 
 const HELP = `Usage: mdcat <file>...
        <markdown-or-unified-diff> | mdcat
+       mdcat --update
 
 Render Markdown files, or Markdown changes in a unified diff, as rich text in a terminal UI.
 
 With no file, mdcat reads stdin and renders it as a diff when it contains one.
+--update installs the latest version with the package manager that installed mdcat.
 
 Examples:
   mdcat README.md
@@ -25,6 +28,9 @@ export async function main(args: readonly string[]): Promise<number> {
   if (argument === "--help" || argument === "-h" || (argument === undefined && process.stdin.isTTY)) {
     process.stdout.write(HELP);
     return 0;
+  }
+  if (argument === "--update") {
+    return update("mdcat");
   }
   return render("mdcat", () => args.length === 0 ? readStdin() : readFiles(args));
 }

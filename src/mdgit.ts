@@ -3,15 +3,20 @@
 import { parseMarkdownDiff, parseMarkdownDocument, type MarkdownDiff, type MarkdownDiffFile } from "./diff.ts";
 import { createBlobReader, readBlobObject, readGit, type GitSubcommand } from "./git.ts";
 import { render } from "./render.ts";
+import { update } from "./update.ts";
 
 const HELP = `Usage: mdgit diff [<git-diff-args>]
        mdgit show [<git-show-args>]
+       mdgit --update
 
 Render the Markdown files changed in git as rich text in a terminal UI.
 
 Commands:
   diff  Render the Markdown files in git diff
   show  Render the Markdown files in git show
+
+Options:
+  --update  Install the latest version with the package manager that installed mdgit
 
 Examples:
   mdgit diff
@@ -25,6 +30,9 @@ export async function main(args: readonly string[]): Promise<number> {
   if (command === undefined || command === "--help" || command === "-h") {
     process.stdout.write(HELP);
     return 0;
+  }
+  if (command === "--update") {
+    return update("mdgit");
   }
   if (command === "diff" || command === "show") {
     return render("mdgit", () => command === "show" ? loadShow(rest) : loadGit(command, rest));

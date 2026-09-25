@@ -21,6 +21,8 @@ npm install -g @shqld/mdcat
 
 The installed commands start with Node.js. To run them with Bun, pass the file to Bun, for example `bun $(which mdcat) README.md`.
 
+To update, run `mdcat --update`. It installs the latest version with Bun or npm, whichever installed `mdcat` globally.
+
 ## Usage
 
 ### mdcat

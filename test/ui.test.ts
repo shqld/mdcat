@@ -744,6 +744,7 @@ test("searches with / and moves between matches with n and N", async () => {
   await setup.renderOnce();
   await setup.waitForVisualIdle();
 
+  expect(setup.captureCharFrame()).not.toContain("n/N");
   await setup.mockInput.typeText("/needle");
   await setup.waitForVisualIdle();
   expect(setup.captureCharFrame()).toContain("/needle");
@@ -751,7 +752,7 @@ test("searches with / and moves between matches with n and N", async () => {
   await setup.waitForVisualIdle();
 
   expect(viewer.scroll.scrollTop).toBeGreaterThan(0);
-  expect(setup.captureCharFrame()).toContain("/needle  1/2");
+  expect(setup.captureCharFrame()).toContain("/needle  1/2 · n/N next/prev");
   const firstRow = setup.captureCharFrame().split("\n").find((line) => line.includes("First Needle here."));
   expect(firstRow).toBeDefined();
 

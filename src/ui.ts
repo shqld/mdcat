@@ -76,7 +76,7 @@ const COLOR = {
   searchText: "#12141c",
 };
 
-const FOOTER_HELP = "j/k scroll · PgUp/PgDn page · g/G jump · / search · n/N next/prev · drag copy · q quit";
+const FOOTER_HELP = "j/k scroll · PgUp/PgDn page · g/G jump · / search · drag copy · q quit";
 
 export interface DiffViewer {
   readonly root: BoxRenderable;
@@ -1395,7 +1395,7 @@ function createSearch(renderer: CliRenderer, scroll: ScrollBoxRenderable, footer
     if (current !== null) {
       scroll.scrollTo(current);
     }
-    showStatus(`/${query}  ${target + 1}/${lines.length}${wrapped ? "  (wrapped)" : ""}`);
+    showStatus(`/${query}  ${target + 1}/${lines.length}${wrapped ? "  (wrapped)" : ""} · n/N next/prev`);
     renderer.requestRender();
   };
 

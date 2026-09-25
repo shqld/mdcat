@@ -6,16 +6,16 @@ Render Markdown files and Markdown diffs as rich text in the terminal. In a diff
 
 Supported runtimes:
 
-- Node.js 26.4 or later
 - Bun 1.3 or later
+- Node.js 26.4 or later
 
 ```sh
-npm install -g @shqld/mdcat
-# or
 bun install -g @shqld/mdcat
+# or
+npm install -g @shqld/mdcat
 ```
 
-The commands start with Node.js. To run them with Bun instead, pass the file to Bun, for example `bun $(which mdcat) README.md`.
+The installed commands start with Node.js. To run them with Bun, pass the file to Bun, for example `bun $(which mdcat) README.md`.
 
 ## Usage
 

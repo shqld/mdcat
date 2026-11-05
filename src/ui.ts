@@ -1260,7 +1260,7 @@ function renderInlineTokens(tokens: readonly Token[], style: InlineStyle): TextC
       return renderInlineTokens(token.tokens, {
         ...style,
         foreground: COLOR.heading1,
-        href: token.href,
+        href: clickableHref(token.href),
         underline: true,
       });
     }
@@ -1322,6 +1322,16 @@ function isDelToken(token: Token): token is Tokens.Del {
 
 function isLinkToken(token: Token): token is Tokens.Link {
   return token.type === "link" && hasInlineTokens(token) && "href" in token && typeof token.href === "string";
+}
+
+const CLICKABLE_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/;
+
+export function clickableHref(href: string): string | undefined {
+  if (CONTROL_CHARACTER.test(href) || !URL.canParse(href)) {
+    return undefined;
+  }
+  return CLICKABLE_PROTOCOLS.has(new URL(href).protocol) ? href : undefined;
 }
 
 function isCodespanToken(token: Token): token is Tokens.Codespan {

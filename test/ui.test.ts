@@ -8,7 +8,7 @@ import {
 import stringWidth from "string-width";
 
 import { parseMarkdownDiff, parseMarkdownDocument } from "../src/diff.ts";
-import { buildDiffViewer } from "../src/ui.ts";
+import { buildDiffViewer, clickableHref } from "../src/ui.ts";
 
 let setup: TestRendererSetup | null = null;
 let treeSitterClient: MockTreeSitterClient | null = null;
@@ -813,4 +813,17 @@ test("finds a pasted phrase that the renderer wrapped across lines", async () =>
   setup.mockInput.pressEnter();
   await setup.waitForVisualIdle();
   expect(setup.captureCharFrame()).toContain("/search results  1/1");
+});
+
+test("clickableHref keeps http, https and mailto links", () => {
+  expect(clickableHref("https://example.com/a")).toBe("https://example.com/a");
+  expect(clickableHref("http://localhost:4510/x")).toBe("http://localhost:4510/x");
+  expect(clickableHref("mailto:a@example.com")).toBe("mailto:a@example.com");
+});
+
+test("clickableHref drops other schemes, relative paths and control characters", () => {
+  expect(clickableHref("file:///etc/passwd")).toBeUndefined();
+  expect(clickableHref("javascript:alert(1)")).toBeUndefined();
+  expect(clickableHref("./README.md")).toBeUndefined();
+  expect(clickableHref("https://example.com/\u001b]8;;x\u0007")).toBeUndefined();
 });

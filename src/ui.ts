@@ -90,6 +90,7 @@ export interface DiffViewerOptions {
 
 export async function showDiff(document: MarkdownDiff): Promise<void> {
   const terminalInput = openTerminalInput();
+  process.env.FORCE_HYPERLINK ??= "1";
   try {
     const renderer = await createCliRenderer({
       stdin: terminalInput.stream,

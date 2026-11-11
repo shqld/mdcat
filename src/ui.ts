@@ -83,7 +83,7 @@ const COLOR = {
   searchText: "#12141c",
 };
 
-const FOOTER_HELP = "j/k scroll · PgUp/PgDn page · g/G jump · / search · click link open · b back · drag copy · q quit";
+const FOOTER_HELP = "j/k scroll · PgUp/PgDn page · g/G jump · / search · click link open · h/l back/forward · drag copy · q quit";
 const WATCH_DELAY_MS = 100;
 
 export interface DiffViewer {
@@ -98,6 +98,7 @@ export interface DiffViewerOptions {
   readonly copyText?: (text: string) => void;
   readonly onLink?: (path: string | null, href: string) => void;
   readonly onBack?: () => void;
+  readonly onForward?: () => void;
 }
 
 export interface Page {
@@ -188,7 +189,7 @@ export function buildDiffViewer(
   scroll.focus();
 
   const search = createSearch(renderer, scroll, footer.text);
-  const keyHandler = createKeyHandler(renderer, scroll, search, options.onBack);
+  const keyHandler = createKeyHandler(renderer, scroll, search, options.onBack, options.onForward);
   const selectionHandler = createSelectionHandler(renderer, options.copyText);
   const links = createLinkMap();
   let pressed: { readonly x: number; readonly y: number } | null = null;
@@ -243,6 +244,7 @@ export function buildDiffViewer(
 export function browse(renderer: CliRenderer, first: Page, options: BrowseOptions = {}): Browser {
   const load = options.load ?? ((location: Location) => loadLocation(location));
   const history: { readonly page: Page; readonly scrollTop: number }[] = [];
+  const forwardHistory: { readonly page: Page; readonly scrollTop: number }[] = [];
   let page = first;
   let viewer: DiffViewer | null = null;
   let watchers: FSWatcher[] = [];
@@ -256,7 +258,7 @@ export function browse(renderer: CliRenderer, first: Page, options: BrowseOption
   const show = (next: Page, scrollTop: number): void => {
     viewer?.destroy();
     page = next;
-    const shown = buildDiffViewer(renderer, next.document, { ...options, onLink, onBack });
+    const shown = buildDiffViewer(renderer, next.document, { ...options, onLink, onBack, onForward });
     viewer = shown;
     shown.scroll.scrollTop = scrollTop;
     renderer.once(CliRenderEvents.FRAME, () => {
@@ -317,6 +319,7 @@ export function browse(renderer: CliRenderer, first: Page, options: BrowseOption
         return;
       }
       history.push({ page, scrollTop: from.scroll.scrollTop });
+      forwardHistory.length = 0;
       show(pageOf(loaded, load), 0);
     } catch (error: unknown) {
       if (viewer === from) {
@@ -331,8 +334,17 @@ export function browse(renderer: CliRenderer, first: Page, options: BrowseOption
 
   function onBack(): void {
     const previous = history.pop();
-    if (previous !== undefined) {
+    if (previous !== undefined && viewer !== null) {
+      forwardHistory.push({ page, scrollTop: viewer.scroll.scrollTop });
       show(previous.page, previous.scrollTop);
+    }
+  }
+
+  function onForward(): void {
+    const next = forwardHistory.pop();
+    if (next !== undefined && viewer !== null) {
+      history.push({ page, scrollTop: viewer.scroll.scrollTop });
+      show(next.page, next.scrollTop);
     }
   }
 
@@ -1732,6 +1744,7 @@ function createKeyHandler(
   scroll: ScrollBoxRenderable,
   search: Search,
   back: (() => void) | undefined,
+  forward: (() => void) | undefined,
 ): (key: KeyEvent) => void {
   return (key) => {
     if (search.prompting()) {
@@ -1750,8 +1763,12 @@ function createKeyHandler(
       renderer.destroy();
       return;
     }
-    if (key.name === "b" || key.name === "backspace") {
+    if (key.name === "h") {
       back?.();
+      return;
+    }
+    if (key.name === "l") {
+      forward?.();
       return;
     }
     if (key.name === "j") {

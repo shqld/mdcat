@@ -56,7 +56,7 @@ Scroll with the arrow keys or `j`/`k`, jump with `g`/`G`, and quit with `q`. Pre
 
 ### Links
 
-Click a link to a Markdown file (`.md` or `.markdown`) to open it in place, and press `b` or Backspace to go back. A relative link opens the local file next to the current one, and an `http` or `https` link downloads the page. Other links are passed to the terminal as hyperlinks for `http`, `https` and `mailto` only. Following links needs hyperlink support, so it is off when `FORCE_HYPERLINK=0`.
+Click a link to a Markdown file (`.md` or `.markdown`) to open it in place, and press `h` and `l` to go back and forward. A relative link opens the local file next to the current one, and an `http` or `https` link downloads the page. Other links are passed to the terminal as hyperlinks for `http`, `https` and `mailto` only. Following links needs hyperlink support, so it is off when `FORCE_HYPERLINK=0`.
 
 Opening a link is limited so that a document cannot do more than show you another document:
 

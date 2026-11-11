@@ -55,7 +55,7 @@ async function clickText(browser: Browser, text: string): Promise<void> {
 }
 
 describe("browse", () => {
-  test("clicking a relative Markdown link opens the file and b goes back", async () => {
+  test("clicking a relative Markdown link opens the file, h goes back and l goes forward", async () => {
     const index = join(directory, "index.md");
     writeFileSync(join(directory, "next.md"), "# Next page\n");
     setup = await createTestRenderer({ width: 80, height: 20 });
@@ -64,8 +64,25 @@ describe("browse", () => {
     await clickText(browser, "the next page");
     expect(await frame()).toContain("Next page");
 
-    setup.mockInput.pressKey("b");
+    setup.mockInput.pressKey("h");
     expect(await frame()).toContain("See the next page.");
+
+    setup.mockInput.pressKey("l");
+    expect(await frame()).toContain("Next page");
+  });
+
+  test("opening a new link after going back drops the forward page", async () => {
+    const index = join(directory, "index.md");
+    writeFileSync(join(directory, "first.md"), "# First page\n");
+    writeFileSync(join(directory, "second.md"), "# Second page\n");
+    setup = await createTestRenderer({ width: 80, height: 20 });
+    const browser = browse(setup.renderer, filePage(index, "Go to [one](first.md) or [two](second.md).\n"));
+
+    await clickText(browser, "one");
+    setup.mockInput.pressKey("h");
+    await clickText(browser, "two");
+    setup.mockInput.pressKey("l");
+    expect(await frame()).toContain("Second page");
   });
 
   test("clicking a link inside a table cell opens the file", async () => {

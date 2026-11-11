@@ -16,7 +16,7 @@ const HELP = `Usage: mdcat [--watch] <file>...
 Render Markdown files, or Markdown changes in a unified diff, as rich text in a terminal UI.
 
 With no file, mdcat reads stdin and renders it as a diff when it contains one.
-Click a link to a Markdown file to open it, and press b to go back.
+Click a link to a Markdown file to open it, and press h and l to go back and forward.
 --watch (-w) renders the files again whenever they change.
 --update installs the latest version with the package manager that installed mdcat.
 

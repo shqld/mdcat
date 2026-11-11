@@ -35,7 +35,10 @@ export async function main(args: readonly string[]): Promise<number> {
     return update("mdgit");
   }
   if (command === "diff" || command === "show") {
-    return render("mdgit", () => command === "show" ? loadShow(rest) : loadGit(command, rest));
+    return render("mdgit", async () => ({
+      document: await (command === "show" ? loadShow(rest) : loadGit(command, rest)),
+      watched: [],
+    }));
   }
   process.stderr.write(`mdgit: '${command}' is not a mdgit command. See 'mdgit --help'.\n`);
   return 1;

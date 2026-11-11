@@ -1,6 +1,7 @@
 #!/usr/bin/env -S node --experimental-ffi --disable-warning=ExperimentalWarning
 
 import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { text } from "node:stream/consumers";
 
 import { isUnifiedDiff, parseMarkdownDiff, parseMarkdownDocument, type MarkdownDiff } from "./diff.ts";
@@ -8,17 +9,20 @@ import { createBlobReader } from "./git.ts";
 import { render } from "./render.ts";
 import { update } from "./update.ts";
 
-const HELP = `Usage: mdcat <file>...
+const HELP = `Usage: mdcat [--watch] <file>...
        <markdown-or-unified-diff> | mdcat
        mdcat --update
 
 Render Markdown files, or Markdown changes in a unified diff, as rich text in a terminal UI.
 
 With no file, mdcat reads stdin and renders it as a diff when it contains one.
+Click a link to a Markdown file to open it, and press b to go back.
+--watch (-w) renders the files again whenever they change.
 --update installs the latest version with the package manager that installed mdcat.
 
 Examples:
   mdcat README.md
+  mdcat --watch notes.md
   cat README.md | mdcat
   git diff --word-diff | mdcat
 `;
@@ -32,7 +36,20 @@ export async function main(args: readonly string[]): Promise<number> {
   if (argument === "--update") {
     return update("mdcat");
   }
-  return render("mdcat", () => args.length === 0 ? readStdin() : readFiles(args));
+  const watching = argument === "--watch" || argument === "-w";
+  const paths = watching ? args.slice(1) : args;
+  if (watching && paths.length === 0) {
+    process.stderr.write("mdcat: --watch needs a file\n");
+    return 1;
+  }
+  if (paths.length === 0) {
+    return render("mdcat", async () => ({ document: await readStdin(), watched: [] }));
+  }
+  return render("mdcat", async () => ({
+    document: await readFiles(paths),
+    reload: () => readFiles(paths),
+    watched: paths.map((path) => resolve(path)),
+  }), { watch: watching });
 }
 
 async function readStdin(): Promise<MarkdownDiff> {

@@ -13,12 +13,15 @@ import {
   bold,
   createCliRenderer,
   fg,
+  getBaseAttributes,
+  getLinkId,
   italic,
   link,
   strikethrough,
   underline,
   type CliRenderer,
   type KeyEvent,
+  type MouseEvent,
   type OptimizedBuffer,
   type PasteEvent,
   type Selection,
@@ -28,9 +31,12 @@ import {
 import { Lexer, type Token, type Tokens } from "marked";
 import { spawn } from "node:child_process";
 import { openSync } from "node:fs";
+import { watch, type FSWatcher } from "node:fs";
+import { basename, dirname } from "node:path";
 import { ReadStream } from "node:tty";
 import stringWidth from "string-width";
 
+import { parseMarkdownDocument } from "./diff.ts";
 import type {
   DiffKind,
   MarkdownDiff,
@@ -44,6 +50,7 @@ import type {
   MarkdownDiffTableRow,
 } from "./diff.ts";
 import type { FlowContainer, FlowLeaf, InlineText } from "./flow.ts";
+import { displayName, loadLocation, locationOf, resolveLink, type LoadedDocument, type Location } from "./location.ts";
 import { findMatchLines, highlightMatches } from "./search.ts";
 import { diffReadable, inlinePlainText, lineBreakText, sameIgnoringWhitespace, sameInlineContent } from "./inline-diff.ts";
 
@@ -76,19 +83,41 @@ const COLOR = {
   searchText: "#12141c",
 };
 
-const FOOTER_HELP = "j/k scroll · PgUp/PgDn page · g/G jump · / search · drag copy · q quit";
+const FOOTER_HELP = "j/k scroll · PgUp/PgDn page · g/G jump · / search · click link open · b back · drag copy · q quit";
+const WATCH_DELAY_MS = 100;
 
 export interface DiffViewer {
   readonly root: BoxRenderable;
   readonly scroll: ScrollBoxRenderable;
+  readonly notify: (message: string) => void;
+  readonly destroy: () => void;
 }
 
 export interface DiffViewerOptions {
   readonly treeSitterClient?: TreeSitterClient;
   readonly copyText?: (text: string) => void;
+  readonly onLink?: (path: string | null, href: string) => void;
+  readonly onBack?: () => void;
 }
 
-export async function showDiff(document: MarkdownDiff): Promise<void> {
+export interface Page {
+  readonly document: MarkdownDiff;
+  readonly reload?: () => Promise<MarkdownDiff>;
+  readonly watched: readonly string[];
+}
+
+export interface BrowseOptions extends DiffViewerOptions {
+  readonly watch?: boolean;
+  readonly load?: (location: Location) => Promise<LoadedDocument>;
+}
+
+export interface Browser {
+  readonly viewer: () => DiffViewer;
+  readonly page: () => Page;
+  readonly settled: () => Promise<void>;
+}
+
+export async function showDiff(page: Page, options: BrowseOptions = {}): Promise<void> {
   const terminalInput = openTerminalInput();
   process.env.FORCE_HYPERLINK ??= "1";
   try {
@@ -99,7 +128,7 @@ export async function showDiff(document: MarkdownDiff): Promise<void> {
       exitOnCtrlC: true,
       onDestroy: terminalInput.close,
     });
-    buildDiffViewer(renderer, document);
+    browse(renderer, page, options);
   } catch (error: unknown) {
     terminalInput.close();
     throw error;
@@ -146,9 +175,11 @@ export function buildDiffViewer(
     },
   });
 
-  for (const file of document.files) {
-    scroll.add(createFile(renderer, file, syntaxStyle, options.treeSitterClient));
-  }
+  const files = document.files.map((file) => {
+    const box = createFile(renderer, file, syntaxStyle, options.treeSitterClient);
+    scroll.add(box);
+    return { box, path: file.path };
+  });
 
   const footer = createFooter(renderer);
   root.add(scroll);
@@ -157,21 +188,234 @@ export function buildDiffViewer(
   scroll.focus();
 
   const search = createSearch(renderer, scroll, footer.text);
-  const keyHandler = createKeyHandler(renderer, scroll, search);
+  const keyHandler = createKeyHandler(renderer, scroll, search, options.onBack);
   const selectionHandler = createSelectionHandler(renderer, options.copyText);
+  const links = createLinkMap();
+  let pressed: { readonly x: number; readonly y: number } | null = null;
+  root.onMouseDown = (event: MouseEvent) => {
+    pressed = event.button === 0 ? { x: event.x, y: event.y } : null;
+  };
+  root.onMouseUp = (event: MouseEvent) => {
+    const clicked = pressed !== null && pressed.x === event.x && pressed.y === event.y;
+    pressed = null;
+    if (!clicked || options.onLink === undefined) {
+      return;
+    }
+    const href = links.at(event.x, event.y);
+    const file = files.find(({ box }) => event.y >= box.screenY && event.y < box.screenY + box.height);
+    if (href !== undefined && file !== undefined) {
+      options.onLink(file.path, href);
+    }
+  };
   renderer.keyInput.on("keypress", keyHandler);
   renderer.keyInput.on("paste", search.paste);
   renderer.on(CliRenderEvents.SELECTION, selectionHandler);
   renderer.addPostProcessFn(search.highlight);
-  renderer.once(CliRenderEvents.DESTROY, () => {
+  renderer.addPostProcessFn(links.collect);
+  const cleanUp = (): void => {
     renderer.keyInput.off("keypress", keyHandler);
     renderer.keyInput.off("paste", search.paste);
     renderer.off(CliRenderEvents.SELECTION, selectionHandler);
+    renderer.off(CliRenderEvents.DESTROY, cleanUp);
     renderer.removePostProcessFn(search.highlight);
+    renderer.removePostProcessFn(links.collect);
     syntaxStyle.destroy();
-  });
+  };
+  renderer.on(CliRenderEvents.DESTROY, cleanUp);
 
-  return { root, scroll };
+  return {
+    root,
+    scroll,
+    notify: (message) => {
+      footer.text.content = message;
+      footer.text.fg = COLOR.text;
+      renderer.requestRender();
+    },
+    destroy: () => {
+      cleanUp();
+      renderer.root.remove(root);
+      root.destroyRecursively();
+      renderer.requestRender();
+    },
+  };
+}
+
+export function browse(renderer: CliRenderer, first: Page, options: BrowseOptions = {}): Browser {
+  const load = options.load ?? ((location: Location) => loadLocation(location));
+  const history: { readonly page: Page; readonly scrollTop: number }[] = [];
+  let page = first;
+  let viewer: DiffViewer | null = null;
+  let watchers: FSWatcher[] = [];
+  let pending: Promise<void> = Promise.resolve();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const track = (work: Promise<void>): void => {
+    pending = pending.then(() => work);
+  };
+
+  const show = (next: Page, scrollTop: number): void => {
+    viewer?.destroy();
+    page = next;
+    const shown = buildDiffViewer(renderer, next.document, { ...options, onLink, onBack });
+    viewer = shown;
+    shown.scroll.scrollTop = scrollTop;
+    renderer.once(CliRenderEvents.FRAME, () => {
+      shown.scroll.scrollTop = scrollTop;
+    });
+    rewatch();
+  };
+
+  const reload = async (): Promise<void> => {
+    const current = page;
+    if (current.reload === undefined) {
+      return;
+    }
+    try {
+      const document = await current.reload();
+      if (page === current && viewer !== null) {
+        show({ ...current, document }, viewer.scroll.scrollTop);
+      }
+    } catch (error: unknown) {
+      viewer?.notify(`Cannot reload: ${errorMessage(error)}`);
+    }
+  };
+
+  const rewatch = (): void => {
+    for (const watcher of watchers) {
+      watcher.close();
+    }
+    watchers = [];
+    if (options.watch !== true || page.reload === undefined) {
+      return;
+    }
+    watchers = page.watched.map((path) =>
+      watch(dirname(path), (_event, name) => {
+        if (name !== null && name !== basename(path)) {
+          return;
+        }
+        if (timer !== null) {
+          clearTimeout(timer);
+        }
+        timer = setTimeout(() => {
+          timer = null;
+          track(reload());
+        }, WATCH_DELAY_MS);
+      })
+    );
+  };
+
+  const follow = async (path: string | null, href: string): Promise<void> => {
+    const target = resolveLink(locationOf(path), href);
+    if (target === null || viewer === null) {
+      return;
+    }
+    const from = viewer;
+    from.notify(`Opening ${displayName(target)}`);
+    try {
+      const loaded = await load(target);
+      if (viewer !== from) {
+        return;
+      }
+      history.push({ page, scrollTop: from.scroll.scrollTop });
+      show(pageOf(loaded, load), 0);
+    } catch (error: unknown) {
+      if (viewer === from) {
+        from.notify(`Cannot open ${displayName(target)}: ${errorMessage(error)}`);
+      }
+    }
+  };
+
+  function onLink(path: string | null, href: string): void {
+    track(follow(path, href));
+  }
+
+  function onBack(): void {
+    const previous = history.pop();
+    if (previous !== undefined) {
+      show(previous.page, previous.scrollTop);
+    }
+  }
+
+  renderer.once(CliRenderEvents.DESTROY, () => {
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
+    for (const watcher of watchers) {
+      watcher.close();
+    }
+  });
+  show(first, 0);
+
+  return {
+    viewer: () => {
+      if (viewer === null) {
+        throw new Error("the viewer is not shown");
+      }
+      return viewer;
+    },
+    page: () => page,
+    settled: async () => {
+      let seen: Promise<void> | null = null;
+      while (seen !== pending) {
+        seen = pending;
+        await seen;
+      }
+    },
+  };
+}
+
+function pageOf(loaded: LoadedDocument, load: (location: Location) => Promise<LoadedDocument>): Page {
+  const documentOf = ({ location, text }: LoadedDocument): MarkdownDiff => ({
+    files: [parseMarkdownDocument(displayName(location), text)],
+  });
+  return {
+    document: documentOf(loaded),
+    reload: async () => documentOf(await load(loaded.location)),
+    watched: loaded.location.kind === "file" ? [loaded.location.path] : [],
+  };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+const INTERNAL_LINK = "mdcat-link:";
+
+interface LinkMap {
+  readonly at: (x: number, y: number) => string | undefined;
+  readonly collect: (buffer: OptimizedBuffer) => void;
+}
+
+function createLinkMap(): LinkMap {
+  let width = 0;
+  let cells = new Map<number, string>();
+  return {
+    at: (x, y) => cells.get(y * width + x),
+    collect: (buffer) => {
+      const attributes = buffer.buffers.attributes;
+      const urls = new Map<number, string>();
+      const next = new Map<number, string>();
+      for (let index = 0; index < attributes.length; index += 1) {
+        const attribute = attributes[index] ?? 0;
+        const id = getLinkId(attribute);
+        if (id === 0) {
+          continue;
+        }
+        const url = urls.get(id) ?? buffer.lib.linkGetUrl(id);
+        urls.set(id, url);
+        if (url.startsWith(INTERNAL_LINK)) {
+          next.set(index, decodeURIComponent(url.slice(INTERNAL_LINK.length)));
+          attributes[index] = getBaseAttributes(attribute);
+        } else if (clickableHref(url) === undefined) {
+          attributes[index] = getBaseAttributes(attribute);
+        } else {
+          next.set(index, url);
+        }
+      }
+      width = buffer.width;
+      cells = next;
+    },
+  };
 }
 
 function createFooter(renderer: CliRenderer): { readonly box: BoxRenderable; readonly text: TextRenderable } {
@@ -1260,7 +1504,7 @@ function renderInlineTokens(tokens: readonly Token[], style: InlineStyle): TextC
       return renderInlineTokens(token.tokens, {
         ...style,
         foreground: COLOR.heading1,
-        href: clickableHref(token.href),
+        href: linkHref(token.href),
         underline: true,
       });
     }
@@ -1326,6 +1570,13 @@ function isLinkToken(token: Token): token is Tokens.Link {
 
 const CLICKABLE_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/;
+
+function linkHref(href: string): string | undefined {
+  if (CONTROL_CHARACTER.test(href) || /^[a-z][a-z0-9+.-]*:/i.test(href)) {
+    return clickableHref(href);
+  }
+  return `${INTERNAL_LINK}${encodeURIComponent(href)}`;
+}
 
 export function clickableHref(href: string): string | undefined {
   if (CONTROL_CHARACTER.test(href) || !URL.canParse(href)) {
@@ -1480,6 +1731,7 @@ function createKeyHandler(
   renderer: CliRenderer,
   scroll: ScrollBoxRenderable,
   search: Search,
+  back: (() => void) | undefined,
 ): (key: KeyEvent) => void {
   return (key) => {
     if (search.prompting()) {
@@ -1496,6 +1748,10 @@ function createKeyHandler(
     }
     if (key.name === "q" || key.name === "escape") {
       renderer.destroy();
+      return;
+    }
+    if (key.name === "b" || key.name === "backspace") {
+      back?.();
       return;
     }
     if (key.name === "j") {

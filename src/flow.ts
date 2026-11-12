@@ -144,10 +144,14 @@ function sectionWidths(leaves: readonly SideLeaf[]): readonly (readonly [SideLea
     const measured = section.filter((leaf) => leaf.type === "heading"
       || (leaf.type === "paragraph" && leaf.path.every((container) => container.type !== "item")));
     const width = measured.some((leaf) => leaf.type === "paragraph")
-      ? Math.max(...measured.flatMap((leaf) => leaf.text.split("\n").flatMap((line) => inlinePlainText(line).split("\n").map((part) => stringWidth(part)))))
+      ? Math.max(...measured.map(widestLine))
       : 0;
-    return section.map((leaf): readonly [SideLeaf, number] => [leaf, width]);
+    return section.map((leaf): readonly [SideLeaf, number] => [leaf, width === 0 ? 0 : Math.max(width, widestLine(leaf))]);
   });
+}
+
+function widestLine(leaf: SideLeaf): number {
+  return Math.max(0, ...leaf.text.split("\n").flatMap((line) => inlinePlainText(line).split("\n").map((part) => stringWidth(part))));
 }
 
 function toFlowLeaf(

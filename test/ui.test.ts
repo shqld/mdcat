@@ -529,6 +529,24 @@ ${" "}
   expect(lines).toContain("  • The cache keeps entries in local memoryshared Redis.");
 });
 
+test("does not wrap a list item narrower than its own source line", async () => {
+  const item = "CV-3149（W&H を v1 へ、#9903）：切替の間に出る 3 つの不具合を受け入れるか";
+  const document = { files: [parseMarkdownDocument("guide.md", `## 判断待ち
+
+1. ${item}
+
+他の topic で待っているもの：
+`)] };
+  setup = await createTestRenderer({ width: 120, height: 20 });
+
+  buildDiffViewer(setup.renderer, document);
+  await setup.renderOnce();
+  await setup.waitForVisualIdle();
+
+  const lines = setup.captureCharFrame().split("\n").map((line) => line.trimEnd());
+  expect(lines.some((line) => line.endsWith(item))).toBe(true);
+});
+
 test("leaves list-only sections at the terminal width", async () => {
   const document = parseMarkdownDiff(`diff --git a/guide.md b/guide.md
 --- a/guide.md
